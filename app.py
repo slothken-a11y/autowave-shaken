@@ -205,7 +205,32 @@ def progress_label(rate: float, target: float = 0.70) -> str:
 # サイドバー：CSVアップロード
 # ──────────────────────────────────────────────
 # ──────────────────────────────────────────────
-# /data フォルダパス定義
+# GoogleドライブファイルID定義
+# ──────────────────────────────────────────────
+GDRIVE_IDS = {
+    "master"     : "147knWIQ1AP09lnPINo1xl0TzDxWDfmDI",
+    "history"    : "17fbI7_5OOf6tSGq4qntL7BpOF-dj3sFq",
+    "reservation": "1oqPp9cRyPGfkFEeXVpBgtdJJWs-uirtZ",
+    "kikan"      : None,  # Excelは手動アップロードのみ
+}
+
+def gdrive_url(file_id: str) -> str:
+    """GoogleドライブダウンロードURLを生成"""
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
+
+@st.cache_data(ttl=300, show_spinner=False)  # 5分キャッシュ
+def load_from_gdrive(file_id: str, name: str) -> pd.DataFrame:
+    """GoogleドライブからCSVを読み込む"""
+    url = gdrive_url(file_id)
+    for enc in ["cp932", "utf-8-sig", "utf-8", "shift_jis"]:
+        try:
+            return pd.read_csv(url, encoding=enc)
+        except Exception:
+            continue
+    raise ValueError(f"{name} をGoogleドライブから読み込めませんでした。")
+
+# ──────────────────────────────────────────────
+# /data フォルダパス定義（ローカル起動用）
 # ──────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -229,25 +254,18 @@ def file_mtime(path: Path) -> str:
 with st.sidebar:
     st.markdown("### 📂 データ読み込み")
 
-    # ── /data フォルダの自動読み込み状況 ──
-    st.markdown("#### 📁 /data フォルダ（自動読み込み）")
-    st.caption(f"配置先：`{DATA_DIR}`")
-
-    auto_status = {}
-    for key, path in DATA_FILES.items():
-        exists = path.exists()
-        auto_status[key] = exists
-        label = path.name
-        mtime = file_mtime(path)
-        opt   = "（任意）" if key == "kikan" else ""
-        if exists:
+    # ── GoogleドライブCSV状況 ──
+    st.markdown("#### ☁️ Googleドライブ（クラウド自動読み込み）")
+    gdrive_labels = {
+        "master"     : "Master_Data.csv",
+        "history"    : "Past_History.csv",
+        "reservation": "Reservation_Data.csv",
+    }
+    for key, label in gdrive_labels.items():
+        fid = GDRIVE_IDS.get(key)
+        if fid:
             st.markdown(
-                f'<div class="upload-status upload-ok">✅ {label}<br>'                f'<span style="font-size:0.75rem;opacity:0.8;">{mtime}</span></div>',
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                f'<div class="upload-status upload-wait">⏳ {label}{opt}（未配置）</div>',
+                f'<div class="upload-status upload-ok">☁️ {label}（Googleドライブ）</div>',
                 unsafe_allow_html=True,
             )
 
@@ -259,14 +277,32 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ── 手動アップロード（/dataにファイルがない場合のフォールバック）──
-    st.markdown("#### 📤 手動アップロード（フォールバック）")
-    st.caption("/data にファイルがない場合のみ使用")
+    # ── /data フォルダの自動読み込み状況（ローカル用）──
+    st.markdown("#### 📁 /data フォルダ（ローカル起動時）")
+    auto_status = {}
+    for key, path in DATA_FILES.items():
+        exists = path.exists()
+        auto_status[key] = exists
+        label = path.name
+        mtime = file_mtime(path)
+        opt   = "（任意）" if key == "kikan" else ""
+        if exists:
+            st.markdown(
+                f'<div class="upload-status upload-ok">✅ {label}<br>'
+                f'<span style="font-size:0.75rem;opacity:0.8;">{mtime}</span></div>',
+                unsafe_allow_html=True,
+            )
 
-    f_master      = st.file_uploader("① Master_Data.csv",      type=["csv"],        key="master",      help="/data/Master_Data.csv が優先されます")
-    f_history     = st.file_uploader("② Past_History.csv",     type=["csv"],        key="history",     help="/data/Past_History.csv が優先されます")
-    f_reservation = st.file_uploader("③ Reservation_Data.csv", type=["csv"],        key="reservation", help="/data/Reservation_Data.csv が優先されます")
-    f_kikan       = st.file_uploader("④ 基幹予約データ.xlsx（任意）", type=["xlsx","xls"], key="kikan",       help="/data/基幹予約データ.xlsx が優先されます")
+    st.markdown("---")
+
+    # ── 手動アップロード（フォールバック）──
+    st.markdown("#### 📤 手動アップロード（フォールバック）")
+    st.caption("GoogleドライブやローカルにCSVがない場合のみ使用")
+
+    f_master      = st.file_uploader("① Master_Data.csv",      type=["csv"],        key="master",      help="Googleドライブが優先されます")
+    f_history     = st.file_uploader("② Past_History.csv",     type=["csv"],        key="history",     help="Googleドライブが優先されます")
+    f_reservation = st.file_uploader("③ Reservation_Data.csv", type=["csv"],        key="reservation", help="Googleドライブが優先されます")
+    f_kikan       = st.file_uploader("④ 基幹予約データ.xlsx（任意）", type=["xlsx","xls"], key="kikan",       help="手動アップロードのみ対応")
 
     st.markdown("---")
     st.markdown("### ⚙️ 分析期間設定")
@@ -302,15 +338,22 @@ with st.sidebar:
 # /data ファイルを優先、なければ手動アップロードを使用
 def resolve_source(data_key: str, uploaded_file):
     """
-    /data フォルダのファイルを優先して返す。
-    なければアップロードファイルを返す。
-    どちらもなければ None。
+    優先順位：
+    1. 手動アップロード（最優先・最新データ）
+    2. Googleドライブ（クラウド自動）
+    3. /data フォルダ（ローカル起動時）
     """
+    # 1. 手動アップロード優先
+    if uploaded_file is not None:
+        return ("upload", uploaded_file)
+    # 2. Googleドライブ
+    fid = GDRIVE_IDS.get(data_key)
+    if fid:
+        return ("gdrive", fid)
+    # 3. /dataフォルダ
     path = DATA_FILES[data_key]
     if path.exists():
         return ("file", str(path))
-    if uploaded_file is not None:
-        return ("upload", uploaded_file)
     return None
 
 src_master      = resolve_source("master",      f_master)
@@ -327,7 +370,7 @@ if not all([src_master, src_history, src_reservation]):
     if not src_reservation: missing.append("Reservation_Data.csv")
     st.warning(
         f"以下のファイルが見つかりません：**{'、'.join(missing)}**\n\n"
-        f"`{DATA_DIR}` に配置するか、サイドバーから手動アップロードしてください。"
+        f"Googleドライブのリンクを確認するか、サイドバーから手動アップロードしてください。"
     )
 
     # サンプルCSVの生成・ダウンロードセクション
@@ -400,7 +443,9 @@ def read_csv_auto(uploaded_file, name: str) -> pd.DataFrame:
 def load_df(src, name: str) -> pd.DataFrame:
     """resolve_source の結果に応じてDataFrameを返す"""
     kind, obj = src
-    if kind == "file":
+    if kind == "gdrive":
+        return load_from_gdrive(obj, name)
+    elif kind == "file":
         return read_csv_auto_path(obj, name)
     else:
         return read_csv_auto(obj, name)
