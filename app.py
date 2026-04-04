@@ -179,7 +179,7 @@ def to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 def parse_date_col(series: pd.Series) -> pd.Series:
     """日付列を柔軟にパース"""
-    return pd.to_datetime(series, errors="coerce", infer_datetime_format=True)
+    return pd.to_datetime(series, errors="coerce")
 
 
 def progress_color(rate: float, target: float = 0.70) -> str:
